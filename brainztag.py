@@ -24,6 +24,7 @@ import os
 import fnmatch
 import re
 import readline
+import pickle
 from optparse import OptionParser
 
 from musicbrainz2.webservice import Query, ReleaseIncludes, ReleaseFilter
@@ -95,6 +96,36 @@ def distinctive_parts(s):
     result = [try_int(part.lower()) for part in parts]
     return result
 
+
+class MockQuery(object):
+    FILE = "testdata.pickle"
+
+    def __init__(self, real=None, recording=False):
+        self.real = real
+        self.recording = recording
+
+        if not self.recording:
+            fh = open(MockQuery.FILE)
+            (self.releases, self.release_by_id) = pickle.load(fh)
+
+    def getReleases(self, args):
+        if self.recording:
+            self.releases = self.real.getReleases(args)
+
+        return self.releases
+
+    def getReleaseById(self, *args):
+        if self.recording:
+            self.release_by_id = self.real.getReleaseById(*args)
+            self.store()
+
+        return self.release_by_id
+
+    def store(self):
+        d = (self.releases, self.release_by_id)
+        pickle.dump(d, open(MockQuery.FILE, "w"))
+
+
 class NoReleasesFoundError(Exception):
     pass
 
@@ -128,7 +159,9 @@ class Track(object):
         return "%i/%i" % (self.number, self.release.tracks_total)
 
 class Release(object):
-    def __init__(self, r):
+    def __init__(self, r, query):
+        self.query = query
+
         self.title = r.title
         self.tracks_total = r.tracksCount
         self.earliestReleaseDate = r.getEarliestReleaseDate()
@@ -169,8 +202,8 @@ class Release(object):
 
 class Tagger(object):
 
-    def __init__(self):
-        self.query = Query()
+    def __init__(self, query=Query()):
+        self.query = query
 
     def guess_artist_and_disc(self, files):
         rel = files[0]
@@ -204,7 +237,7 @@ isn't in the following list.
         releases = []
         for result in results:
             # wrap result into our own structure
-            release = Release(result.release)
+            release = Release(result.release, self.query)
             # only keep releases with correct amount of tracks
             if track_count < 0 or release.tracks_total == track_count:
                 releases.append(release)
@@ -313,7 +346,17 @@ def parse(args):
                       help="strip existing ID3 and APEv2 tags from files")
     parser.add_option('-g', '--genre', dest='genre',
                       help="set the genre frame")
+    parser.add_option("", '--dev-store-data', action='store_true',
+                      help="record the data transfered from the " +
+                           "MusicBrainz server and stores it for later use")
+    parser.add_option("", '--dev-load-data', action='store_true',
+                      help="load the data stored in a previous run instead " +
+                           "of going online")
+
     options, args = parser.parse_args(args)
+
+    if options.dev_load_data and options.dev_store_data:
+        error("You can't load and store data at the same time")
 
     if len(args) == 1 and os.path.isdir(args[0]):
         return options, args[0]
@@ -387,9 +430,16 @@ def error(msg, exitcode=1):
 def run(args):
     options, arg = parse(args)
 
+    if options.dev_store_data:
+        query = MockQuery(Query(), recording=True)
+    elif options.dev_load_data:
+        query = MockQuery()
+    else:
+        query = Query()
+
     files = parse_file_list(arg)
 
-    tagger = Tagger()
+    tagger = Tagger(query)
 
     artist, disc_title = tagger.guess_artist_and_disc(files)
     artist = ask('Artist: ', artist)
@@ -423,7 +473,6 @@ def run(args):
     if yes_or_no("Rename?"):
         tagger.rename(files, release, progress=progress)
         print
-
 
 def main(args):
     run(args)

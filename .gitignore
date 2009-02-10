@@ -1,3 +1,4 @@
 *.pyc
 /musicbrainz2
 /mutagen
+testdata.pickle
