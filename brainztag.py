@@ -104,6 +104,9 @@ class MockQuery(object):
         self.real = real
         self.recording = recording
 
+        self.releases = None
+        self.release_by_id = None
+
         if not self.recording:
             fh = open(MockQuery.FILE)
             (self.releases, self.release_by_id) = pickle.load(fh)
@@ -111,6 +114,7 @@ class MockQuery(object):
     def getReleases(self, args):
         if self.recording:
             self.releases = self.real.getReleases(args)
+            self.store()
 
         return self.releases
 
@@ -161,7 +165,6 @@ class Track(object):
 class Release(object):
     def __init__(self, r, query):
         self.query = query
-
         self.title = r.title
         self.tracks_total = r.tracksCount
         self.earliestReleaseDate = r.getEarliestReleaseDate()
@@ -429,6 +432,7 @@ def error(msg, exitcode=1):
 
 def run(args):
     options, arg = parse(args)
+    files = parse_file_list(arg)
 
     if options.dev_store_data:
         query = MockQuery(Query(), recording=True)
@@ -436,8 +440,6 @@ def run(args):
         query = MockQuery()
     else:
         query = Query()
-
-    files = parse_file_list(arg)
 
     tagger = Tagger(query)
 
